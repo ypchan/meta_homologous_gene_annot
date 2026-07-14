@@ -28,30 +28,60 @@ gffread is optional when `--skip_sequence_export` is specified. miniprot and pig
 
 ## Installation
 
-### Option 1: Conda or Mamba (recommended)
+### 1. Install the external programs
 
-Clone or download the repository, then run the following commands from its root directory:
-
-```bash
-mamba env create -f environment.yml
-mamba activate meta-homologous-gene-annot
-python3 meta_homologous_gene_annot.py --help
-```
-
-If Mamba is not available, replace `mamba` in the first command with `conda`.
-
-### Option 2: Existing Python environment
-
-Install miniprot, gffread, and pigz and ensure that they are available on `PATH`. Then install the Python dependencies:
+Install a C/C++ compiler, GNU Make, Git, the zlib development headers, and pigz with the package manager provided by the operating system. For example, on Ubuntu or Debian:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install --upgrade pip
-python3 -m pip install -r requirements.txt
+sudo apt-get update
+sudo apt-get install build-essential git zlib1g-dev pigz python3 python3-pip
 ```
 
-Verify the installation:
+Build miniprot and gffread from their upstream source repositories:
+
+```bash
+mkdir -p "$HOME/src" "$HOME/.local/bin"
+
+cd "$HOME/src"
+git clone https://github.com/lh3/miniprot.git
+cd miniprot
+make
+install -m 0755 miniprot "$HOME/.local/bin/miniprot"
+
+cd "$HOME/src"
+git clone https://github.com/gpertea/gffread.git
+cd gffread
+make release
+install -m 0755 gffread "$HOME/.local/bin/gffread"
+```
+
+These commands follow the official [miniprot](https://github.com/lh3/miniprot#installation) and [gffread](https://github.com/gpertea/gffread#installation) build instructions. Add `$HOME/.local/bin` to `PATH` in the shell startup file if it is not already present:
+
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+If pigz is unavailable from the operating-system package manager or root access is unavailable, build it from its [upstream source](https://github.com/madler/pigz):
+
+```bash
+cd "$HOME/src"
+git clone https://github.com/madler/pigz.git
+cd pigz
+make
+install -m 0755 pigz "$HOME/.local/bin/pigz"
+```
+
+### 2. Install the Python dependencies
+
+Clone or download this repository, then install the required packages into the current user's existing Python environment:
+
+```bash
+python3 -m pip install --user --upgrade -r requirements.txt
+```
+
+The `--user` option installs the packages below the current user's home directory and does not modify the system-wide Python installation. If user-site packages are disabled on a managed system, ask the system administrator to install the packages listed in `requirements.txt` for the available Python interpreter.
+
+### 3. Verify the installation
 
 ```bash
 python3 --version
@@ -272,21 +302,15 @@ Do not run two processes with the same `--outdir` and `--sample` at the same tim
 
 ## Updating
 
-Retrieve code updates with Git and update the Conda environment:
+Retrieve code updates and refresh the Python dependencies:
 
 ```bash
 git pull
-mamba env update -f environment.yml --prune
-mamba activate meta-homologous-gene-annot
+python3 -m pip install --user --upgrade -r requirements.txt
 python3 meta_homologous_gene_annot.py --help
 ```
 
-For a `venv` and pip installation, update the Python dependencies as follows:
-
-```bash
-source .venv/bin/activate
-python3 -m pip install --upgrade -r requirements.txt
-```
+Update miniprot, gffread, and pigz with the operating-system package manager when they were installed as system packages. When they were built from source, run `git pull` in each source directory, rebuild it with the upstream command shown in the installation section, and copy the rebuilt executable to `$HOME/.local/bin` again.
 
 After updating the script, miniprot, or gffread, use `--force` to recompute important results. The checkpoint signature records the declared program version and external tool versions, but it does not hash the script itself. If the code changes without a corresponding `PROGRAM_VERSION` change, old stages may still be considered compatible.
 
