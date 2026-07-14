@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments and local configuration
+.venv/
+venv/
+.env
+.env.*
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Pipeline work directories
+.work/
+
+# Pipeline outputs
+*.run.log
+*.state.json
+*.run_metadata.json
+*.stage_metrics.tsv
+*.reference.clean.faa
+*.reference_map.tsv
+*.miniprot.mpi
+*.miniprot.index.log
+*.miniprot.raw.gff3
+*.miniprot.map.log
+*.all_hits.tsv
+*.best_loci.tsv
+*.best_loci.gff3
+*.hit_contig_ids.txt
+*.query_summary.tsv
+*.contig_summary.tsv
+*.hit_contigs.fasta
+*.hit_contigs.fasta.gz
+*.genes.cds.fasta
+*.genes.cds.fasta.gz
+*.genes.protein.fasta
+*.genes.protein.fasta.gz
+*.genes.transcript.fasta
+*.genes.transcript.fasta.gz
+*.gffread.log
+*.pigz.log
+*.summary.tsv
+*.done
