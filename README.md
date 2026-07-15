@@ -40,7 +40,7 @@ The table below assumes a sample name of `sample01`.
 | --- | --- |
 | `sample01.miniprot.raw.gff3` | Raw miniprot GFF3 before final filtering. `##PAF` lines retain detailed `cg` and `cs` protein-to-genome alignments. |
 | `sample01.best_loci.gff3` | Filtered and locus-collapsed GFF3 in contig coordinates. It contains the selected `##PAF` records and normalized `gene`, `mRNA`, `exon`, `CDS`, eukaryotic `intron`, and optional `stop_codon` features. |
-| `sample01.gene.fasta` | One sequence per nonredundant within-sample locus, with IDs such as `sample01_PHILOCUS...`. Use this file for cross-sample dereplication and read mapping. It is always retained as uncompressed FASTA. |
+| `sample01.gene.fasta` | One sequence per nonredundant within-sample locus, with IDs such as `sample01_MHGLOCUS...`. Use this file for cross-sample dereplication and read mapping. It is always retained as uncompressed FASTA. |
 | `sample01.gene.gff3` | Gene-coordinate GFF3 paired with `sample01.gene.fasta`. The SeqID equals the locus ID and every gene spans `1..gene_length`. |
 | `sample01.best_loci.tsv` | Original contig and coordinates, reference protein, identity, query coverage, confidence, and alternative references for each selected locus. |
 | `sample01.all_hits.tsv` | Every miniprot mRNA hit, including rejected records and their failure reasons. |
@@ -57,7 +57,7 @@ If a gene occupies `[S, E]` on a contig, GFF3 uses 1-based closed intervals:
 
 ```text
 contig GFF3:  contig_7    gene    S            E
-gene FASTA:   >sample01_PHILOCUS0000001, length E-S+1
+gene FASTA:   >sample01_MHGLOCUS0000001, length E-S+1
 gene GFF3:    locus_id     gene    1            E-S+1
 conversion:   gene_pos = contig_pos - S + 1
 ```
@@ -189,7 +189,7 @@ python3 meta_homologous_gene_annot.py --help
 
 ### Reference Proteins: `--proteins/-p`
 
-Plain and `.gz/.bgz/.bgzf` FASTA files are supported. The first whitespace-delimited header field becomes `original_id`, while the complete header is retained in the results. Duplicate original IDs are allowed; the program assigns unique internal IDs such as `PHIREF000000001` in input order. Sequences are converted to uppercase, whitespace, `-`, `.`, and terminal `*` characters are removed, and unrecognized residues are converted to `X` and recorded.
+Plain and `.gz/.bgz/.bgzf` FASTA files are supported. The first whitespace-delimited header field becomes `original_id`, while the complete header is retained in the results. Duplicate original IDs are allowed; the program assigns neutral internal IDs such as `MHGREF000000001` in input order. Sequences are converted to uppercase, whitespace, `-`, `.`, and terminal `*` characters are removed, and unrecognized residues are converted to `X` and recorded. The input may contain proteins from any database or custom protein collection.
 
 ### Single-Sample Contigs: `--contigs/-c`
 
@@ -606,6 +606,10 @@ Do not run two processes with the same `--outdir` and `--sample` simultaneously.
 - [GFF3 specification](https://github.com/The-Sequence-Ontology/Specifications/blob/master/gff3.md)
 
 ## Changelog
+
+### 1.2.0
+
+- Replaced legacy PHI-specific program and identifier names with neutral `meta_homologous_gene_annot`, `MHGREF`, and `MHGLOCUS` names suitable for arbitrary reference proteins.
 
 ### 1.1.0
 

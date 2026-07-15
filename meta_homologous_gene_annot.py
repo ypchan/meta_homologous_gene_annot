@@ -59,8 +59,8 @@ from rich.text import Text
 from rich_argparse import RawDescriptionRichHelpFormatter
 
 
-PROGRAM = "phi_contig_annotator"
-PROGRAM_VERSION = "1.1.0"
+PROGRAM = "meta_homologous_gene_annot"
+PROGRAM_VERSION = "1.2.0"
 GFF_SOURCE = "miniprot"
 STAGE_ORDER = [
     "prepare_reference",
@@ -80,7 +80,7 @@ INPUT FORMAT
    Protein FASTA, optionally gzip-compressed (.gz/.bgz).
 
    Example:
-       >PHI:1234 gene=MEP4 pathogen=Trichophyton_mentagrophytes
+       >reference_protein_001 description=example_protein
        MKFSLALALAVASASA...
 
    Rules:
@@ -115,10 +115,10 @@ INPUT FORMAT
 Typical command
 ---------------
 python3 meta_homologous_gene_annot.py \
-    --proteins /share/cn1_fs/project/cyp_chenyanpeng/3domains/15_phibase/phi-base_current.fas \
-    --contigs /share/data02/project/chenyanpeng/mangrove_2017_2025/01_contigs/201704_MF1.fasta.gz \
-    --outdir 15_phibase/201704_MF1 \
-    --sample 201704_MF1 \
+    --proteins references/target_proteins.faa \
+    --contigs assemblies/sample01.fasta.gz \
+    --outdir results/sample01 \
+    --sample sample01 \
     --organism_type euk \
     --threads 24
 """
@@ -171,8 +171,8 @@ Gene-reference coordinates
 Threshold interpretation
 ------------------------
 These defaults are designed for sensitive homolog discovery, not species-level
-identification. A PHI-base homolog does not by itself prove that the contig is
-from the pathogen represented by the reference protein.
+identification. A protein homolog does not by itself establish the taxonomy,
+phenotype, or biological function of the source contig.
 """
 
 
@@ -594,7 +594,7 @@ def prepare_reference(
             clean_sequence = "".join(cleaned)
 
             n_written += 1
-            query_id = f"PHIREF{n_written:09d}"
+            query_id = f"MHGREF{n_written:09d}"
             original_id = header.split(maxsplit=1)[0] if header else query_id
             original_header = re.sub(r"[\t\r\n]+", " ", header).strip()
 
@@ -1201,7 +1201,7 @@ def parse_and_filter_hits(
                 if item["model_id"] != best["model_id"]
             }
         )
-        best["locus_id"] = f"{sample}_PHILOCUS{index:07d}"
+        best["locus_id"] = f"{sample}_MHGLOCUS{index:07d}"
         best["locus_start"] = min(item["start"] for item in cluster)
         best["locus_end"] = max(item["end"] for item in cluster)
         best["n_reference_hits"] = len(cluster)
@@ -1531,10 +1531,10 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=f"""
 Example:
   {example_command} \\
-      --proteins phi-base_current.fas \\
-      --contigs 201704_MF1.fasta.gz \\
-      --outdir 201704_MF1.phi_scan \\
-      --sample 201704_MF1 \\
+      --proteins target_proteins.faa \\
+      --contigs sample01.fasta.gz \\
+      --outdir results/sample01 \\
+      --sample sample01 \\
       --organism_type euk \\
       --threads 24
 

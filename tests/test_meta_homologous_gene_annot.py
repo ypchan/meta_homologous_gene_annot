@@ -8,15 +8,15 @@ import meta_homologous_gene_annot as app
 
 
 RAW_GFF = """##gff-version 3
-##PAF\tPHIREF000000001\t100\t0\t100\t+\tctg_plus\t60\t4\t45\t120\t120\t0\tAS:i:100\tcg:Z:4M9N6M\tcs:Z::4~gt9ag:6
-ctg_plus\tminiprot\tmRNA\t5\t45\t100\t+\t.\tID=PHIREF000000001@1;Rank=1;Identity=0.9000;Positive=0.9500;Target=PHIREF000000001 1 100
-ctg_plus\tminiprot\tCDS\t5\t15\t50\t+\t0\tParent=PHIREF000000001@1;Rank=1;Identity=0.9000;Target=PHIREF000000001 1 40
-ctg_plus\tminiprot\tCDS\t25\t45\t50\t+\t1\tParent=PHIREF000000001@1;Rank=1;Identity=0.9000;Target=PHIREF000000001 41 100
-ctg_plus\tminiprot\tstop_codon\t43\t45\t50\t+\t0\tParent=PHIREF000000001@1;Rank=1
-##PAF\tPHIREF000000002\t100\t0\t100\t-\tctg_minus\t60\t9\t40\t120\t120\t0\tAS:i:90\tcg:Z:4M9N6M\tcs:Z::4~gt9ag:6
-ctg_minus\tminiprot\tmRNA\t10\t40\t90\t-\t.\tID=PHIREF000000002@1;Rank=1;Identity=0.8500;Positive=0.9000;Target=PHIREF000000002 1 100
-ctg_minus\tminiprot\tCDS\t30\t40\t45\t-\t0\tParent=PHIREF000000002@1;Rank=1;Identity=0.8500;Target=PHIREF000000002 1 40
-ctg_minus\tminiprot\tCDS\t10\t20\t45\t-\t2\tParent=PHIREF000000002@1;Rank=1;Identity=0.8500;Target=PHIREF000000002 41 100
+##PAF\tMHGREF000000001\t100\t0\t100\t+\tctg_plus\t60\t4\t45\t120\t120\t0\tAS:i:100\tcg:Z:4M9N6M\tcs:Z::4~gt9ag:6
+ctg_plus\tminiprot\tmRNA\t5\t45\t100\t+\t.\tID=MHGREF000000001@1;Rank=1;Identity=0.9000;Positive=0.9500;Target=MHGREF000000001 1 100
+ctg_plus\tminiprot\tCDS\t5\t15\t50\t+\t0\tParent=MHGREF000000001@1;Rank=1;Identity=0.9000;Target=MHGREF000000001 1 40
+ctg_plus\tminiprot\tCDS\t25\t45\t50\t+\t1\tParent=MHGREF000000001@1;Rank=1;Identity=0.9000;Target=MHGREF000000001 41 100
+ctg_plus\tminiprot\tstop_codon\t43\t45\t50\t+\t0\tParent=MHGREF000000001@1;Rank=1
+##PAF\tMHGREF000000002\t100\t0\t100\t-\tctg_minus\t60\t9\t40\t120\t120\t0\tAS:i:90\tcg:Z:4M9N6M\tcs:Z::4~gt9ag:6
+ctg_minus\tminiprot\tmRNA\t10\t40\t90\t-\t.\tID=MHGREF000000002@1;Rank=1;Identity=0.8500;Positive=0.9000;Target=MHGREF000000002 1 100
+ctg_minus\tminiprot\tCDS\t30\t40\t45\t-\t0\tParent=MHGREF000000002@1;Rank=1;Identity=0.8500;Target=MHGREF000000002 1 40
+ctg_minus\tminiprot\tCDS\t10\t20\t45\t-\t2\tParent=MHGREF000000002@1;Rank=1;Identity=0.8500;Target=MHGREF000000002 41 100
 """
 
 
@@ -38,8 +38,8 @@ class GeneReferenceOutputTests(unittest.TestCase):
                     "replaced_residues",
                 ]
             )
-            writer.writerow(["PHIREF000000001", "ref_plus", "ref_plus annotation", 100, 0])
-            writer.writerow(["PHIREF000000002", "ref_minus", "ref_minus annotation", 100, 0])
+            writer.writerow(["MHGREF000000001", "ref_plus", "ref_plus annotation", 100, 0])
+            writer.writerow(["MHGREF000000002", "ref_minus", "ref_minus annotation", 100, 0])
 
     def tearDown(self):
         self.tempdir.cleanup()
@@ -94,7 +94,7 @@ class GeneReferenceOutputTests(unittest.TestCase):
         self.assertEqual(stats["introns"], 2)
 
         contig_gff = paths["best.gff3"].read_text(encoding="utf-8")
-        self.assertIn("##PAF\tPHIREF000000001", contig_gff)
+        self.assertIn("##PAF\tMHGREF000000001", contig_gff)
         self.assertIn("\tgene\t5\t45\t", contig_gff)
         self.assertIn("\texon\t5\t15\t", contig_gff)
         self.assertIn("\tintron\t16\t24\t", contig_gff)
@@ -104,7 +104,7 @@ class GeneReferenceOutputTests(unittest.TestCase):
         plus_locus = loci["ctg_plus"]
         minus_locus = loci["ctg_minus"]
         self.assertIn(f"##sequence-region {plus_locus} 1 41", gene_gff)
-        self.assertIn(f"{plus_locus}\tphi_contig_annotator\tgene\t1\t41\t", gene_gff)
+        self.assertIn(f"{plus_locus}\tmeta_homologous_gene_annot\tgene\t1\t41\t", gene_gff)
         self.assertIn("\texon\t1\t11\t", gene_gff)
         self.assertIn("\tintron\t12\t20\t", gene_gff)
         self.assertIn(f"ID={minus_locus}.t1.exon2", gene_gff)
@@ -127,6 +127,20 @@ class GeneReferenceOutputTests(unittest.TestCase):
         self.assertIn("##gff-version 3", text)
         self.assertIn("\tmRNA\t", text)
         self.assertIn("\tCDS\t", text)
+
+    def test_generated_identifiers_are_database_neutral(self):
+        reference = self.root / "input.faa"
+        clean = self.root / "clean.faa"
+        mapping = self.root / "mapping.tsv"
+        reference.write_text(">custom_protein\nMPEPTIDE\n", encoding="utf-8")
+        app.prepare_reference(reference, clean, mapping)
+        self.assertTrue(clean.read_text(encoding="utf-8").startswith(">MHGREF000000001\n"))
+
+        paths, _ = self.run_parse("euk")
+        with open(paths["best.tsv"], "r", encoding="utf-8") as handle:
+            loci = [row["locus_id"] for row in csv.DictReader(handle, delimiter="\t")]
+        self.assertTrue(loci)
+        self.assertTrue(all(locus.startswith("sampleA_MHGLOCUS") for locus in loci))
 
     def test_organism_type_selects_miniprot_splicing_options(self):
         eukaryote = SimpleNamespace(
