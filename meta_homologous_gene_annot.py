@@ -6,7 +6,8 @@ meta_homologous_gene_annot.py
 
 Map reference proteins to one metagenomic contig assembly with miniprot,
 filter and collapse redundant gene models, extract hit contigs, and export
-GFF3/CDS/protein/transcript sequences.
+contig-coordinate GFF3, standalone gene references, CDS, proteins, and
+transcripts.
 
 Required Python packages:
     rich
@@ -59,7 +60,7 @@ from rich_argparse import RawDescriptionRichHelpFormatter
 
 
 PROGRAM = "phi_contig_annotator"
-PROGRAM_VERSION = "1.0.0"
+PROGRAM_VERSION = "1.1.0"
 GFF_SOURCE = "miniprot"
 STAGE_ORDER = [
     "prepare_reference",
@@ -106,6 +107,11 @@ INPUT FORMAT
    All main outputs are written directly under --outdir. Only one hidden work
    directory is used temporarily. Existing compatible results can be resumed.
 
+4. --organism_type
+   Use "eukaryote" for splice-aware annotation (the default) or "prokaryote"
+   to disable miniprot splicing. Eukaryotic GFF3 contains inferred introns;
+   prokaryotic GFF3 contains exon/CDS features but no intron features.
+
 Typical command
 ---------------
 python3 meta_homologous_gene_annot.py \
@@ -113,6 +119,7 @@ python3 meta_homologous_gene_annot.py \
     --contigs /share/data02/project/chenyanpeng/mangrove_2017_2025/01_contigs/201704_MF1.fasta.gz \
     --outdir 15_phibase/201704_MF1 \
     --sample 201704_MF1 \
+    --organism_type eukaryote \
     --threads 24
 """
 
@@ -122,8 +129,9 @@ DEFAULT PARAMETERS
 
 Alignment
 ---------
+organism_type           eukaryote
 threads                 available CPUs, capped at 32 when not specified
-splice_model            1      general splice model, appropriate for fungi
+splice_model            1 for eukaryote; splicing disabled for prokaryote
 max_intron               20000  maximum intron length in bp
 index_subsample          1      miniprot -M; k-mer sampling rate is 1/2**M
 max_hits                 50     retained/output alignments per query protein
@@ -153,6 +161,12 @@ keep_index               disabled after a successful run
 keep_uncompressed        disabled
 compression_threads      min(threads, 8)
 log width                max(48, terminal_columns // 2)
+
+Gene-reference coordinates
+--------------------------
+<sample>.gene.fasta      one genomic gene span per selected locus
+<sample>.gene.gff3       the same models rebased to their locus sequence
+                         (SeqID=locus_id; gene coordinates=1..gene_length)
 
 Threshold interpretation
 ------------------------
@@ -452,6 +466,12 @@ def detect_threads() -> int:
     return min(os.cpu_count() or 1, 32)
 
 
+def miniprot_annotation_options(args: argparse.Namespace) -> list[str]:
+    if args.organism_type == "prokaryote":
+        return ["-S"]
+    return ["-j", str(args.splice_model), "-G", str(args.max_intron)]
+
+
 def require_executable(name_or_path: str) -> str:
     if os.path.sep in name_or_path:
         path = Path(name_or_path).expanduser().resolve()
@@ -683,6 +703,327 @@ def write_tsv(path: Path, rows: Iterable[dict[str, Any]], columns: Sequence[str]
     os.replace(temp, path)
 
 
+def load_miniprot_models(raw_gff: Path) -> dict[str, dict[str, Any]]:
+    """Load miniprot feature blocks and their embedded detailed PAF lines."""
+    models: dict[str, dict[str, Any]] = {}
+    pending_alignment: list[str] = []
+
+    with open(raw_gff, "r", encoding="utf-8", errors="replace") as handle:
+        for raw in handle:
+            line = raw.rstrip("\r\n")
+            if line.startswith("##PAF\t"):
+                pending_alignment = [line]
+                continue
+            if line.startswith(("##ATN\t", "##ATA\t", "##AAS\t", "##AQA\t", "##STA\t")):
+                pending_alignment.append(line)
+                continue
+            if not line or line.startswith("#"):
+                continue
+
+            fields = line.split("\t")
+            if len(fields) != 9:
+                continue
+            attrs = parse_gff_attributes(fields[8])
+            if fields[2] == "mRNA":
+                model_id = attrs.get("ID", "")
+                if not model_id:
+                    pending_alignment = []
+                    continue
+                models[model_id] = {
+                    "mrna": fields,
+                    "children": [],
+                    "alignment": pending_alignment,
+                }
+                pending_alignment = []
+                continue
+
+            for parent in (item for item in attrs.get("Parent", "").split(",") if item):
+                if parent in models:
+                    models[parent]["children"].append(fields)
+
+    return models
+
+
+def merge_feature_intervals(
+    features: Sequence[list[str]], fallback: tuple[int, int]
+) -> list[tuple[int, int]]:
+    """Merge CDS/stop-codon intervals into exon intervals."""
+    intervals = sorted(
+        (safe_int(fields[3]), safe_int(fields[4]))
+        for fields in features
+        if fields[2] in {"CDS", "stop_codon"}
+        and safe_int(fields[3]) > 0
+        and safe_int(fields[4]) >= safe_int(fields[3])
+    )
+    if not intervals:
+        return [fallback]
+
+    merged: list[tuple[int, int]] = []
+    for start, end in intervals:
+        if not merged or start > merged[-1][1] + 1:
+            merged.append((start, end))
+        else:
+            merged[-1] = (merged[-1][0], max(merged[-1][1], end))
+    return merged
+
+
+def write_selected_gff_files(
+    raw_gff: Path,
+    best_loci: Sequence[dict[str, Any]],
+    best_gff: Path,
+    gene_gff: Path,
+    organism_type: str,
+) -> dict[str, int]:
+    """Write selected models in contig and standalone-gene coordinate systems."""
+    models = load_miniprot_models(raw_gff)
+    best_gff_tmp = best_gff.with_name(best_gff.name + ".tmp")
+    gene_gff_tmp = gene_gff.with_name(gene_gff.name + ".tmp")
+    exon_total = 0
+    intron_total = 0
+
+    with open(best_gff_tmp, "w", encoding="utf-8") as contig_out, open(
+        gene_gff_tmp, "w", encoding="utf-8"
+    ) as gene_out:
+        contig_out.write("##gff-version 3\n")
+        gene_out.write("##gff-version 3\n")
+
+        for selected in best_loci:
+            model = models.get(str(selected["model_id"]))
+            if model is None:
+                raise RuntimeError(
+                    f"Selected miniprot model is absent from raw GFF3: {selected['model_id']}"
+                )
+
+            mrna = model["mrna"]
+            children: list[list[str]] = model["children"]
+            locus_id = str(selected["locus_id"])
+            transcript_id = f"{locus_id}.t1"
+            gene_start = safe_int(selected["start"])
+            gene_end = safe_int(selected["end"])
+            gene_length = gene_end - gene_start + 1
+            strand = str(selected["strand"])
+            reference_id = str(selected["original_id"] or selected["query_id"])
+            source_attrs = {
+                "gene_id": locus_id,
+                "Name": locus_id,
+                "SampleID": str(selected["sample_id"]),
+                "ReferenceID": reference_id,
+                "ReferenceHitCount": str(selected["n_reference_hits"]),
+                "Confidence": str(selected["confidence"]),
+                "QueryCoverage": f"{selected['query_coverage']:.6f}",
+                "Identity": f"{selected['identity']:.6f}",
+                "ModelID": str(selected["model_id"]),
+                "SourceContig": str(selected["contig"]),
+                "SourceStart": str(gene_start),
+                "SourceEnd": str(gene_end),
+                "SourceStrand": strand,
+                "OrganismType": organism_type,
+                "ReferenceAnnotation": str(selected["reference_annotation"])[:2000],
+            }
+            if selected["alternative_references"]:
+                source_attrs["AlternativeReferences"] = str(
+                    selected["alternative_references"]
+                )
+            exon_intervals = merge_feature_intervals(children, (gene_start, gene_end))
+            exon_total += len(exon_intervals)
+
+            exon_transcript_order = (
+                exon_intervals if strand != "-" else list(reversed(exon_intervals))
+            )
+            exon_numbers = {
+                interval: index for index, interval in enumerate(exon_transcript_order, 1)
+            }
+
+            introns: list[tuple[int, int, int]] = []
+            if organism_type == "eukaryote":
+                for left, right in zip(exon_intervals, exon_intervals[1:]):
+                    intron_start = left[1] + 1
+                    intron_end = right[0] - 1
+                    if intron_start <= intron_end:
+                        intron_number = min(exon_numbers[left], exon_numbers[right])
+                        introns.append((intron_start, intron_end, intron_number))
+            intron_total += len(introns)
+
+            for coordinate_mode, output in (("contig", contig_out), ("gene", gene_out)):
+                if coordinate_mode == "contig":
+                    seqid = str(selected["contig"])
+                    offset = 0
+                    for alignment_line in model["alignment"]:
+                        output.write(alignment_line + "\n")
+                else:
+                    seqid = locus_id
+                    offset = gene_start - 1
+                    output.write(f"##sequence-region {locus_id} 1 {gene_length}\n")
+
+                def convert(start: int, end: int) -> tuple[int, int]:
+                    return start - offset, end - offset
+
+                local_gene_start, local_gene_end = convert(gene_start, gene_end)
+                gene_fields = [
+                    seqid,
+                    PROGRAM,
+                    "gene",
+                    str(local_gene_start),
+                    str(local_gene_end),
+                    mrna[5],
+                    strand,
+                    ".",
+                    format_gff_attributes({"ID": locus_id, **source_attrs}),
+                ]
+                output.write("\t".join(gene_fields) + "\n")
+
+                raw_mrna_attrs = parse_gff_attributes(mrna[8])
+                raw_mrna_attrs.pop("ID", None)
+                transcript_attrs = {
+                    "ID": transcript_id,
+                    "Parent": locus_id,
+                    "gene_id": locus_id,
+                    "transcript_id": transcript_id,
+                    **raw_mrna_attrs,
+                    "ModelID": str(selected["model_id"]),
+                    "ReferenceID": reference_id,
+                    "Confidence": str(selected["confidence"]),
+                    "QueryCoverage": f"{selected['query_coverage']:.6f}",
+                }
+                transcript_fields = [
+                    seqid,
+                    mrna[1],
+                    "mRNA",
+                    str(local_gene_start),
+                    str(local_gene_end),
+                    mrna[5],
+                    strand,
+                    ".",
+                    format_gff_attributes(transcript_attrs),
+                ]
+                output.write("\t".join(transcript_fields) + "\n")
+
+                derived_records: list[tuple[int, int, int, list[str]]] = []
+                for exon_start, exon_end in exon_intervals:
+                    exon_number = exon_numbers[(exon_start, exon_end)]
+                    local_start, local_end = convert(exon_start, exon_end)
+                    fields = [
+                        seqid,
+                        PROGRAM,
+                        "exon",
+                        str(local_start),
+                        str(local_end),
+                        ".",
+                        strand,
+                        ".",
+                        format_gff_attributes(
+                            {
+                                "ID": f"{transcript_id}.exon{exon_number}",
+                                "Parent": transcript_id,
+                                "gene_id": locus_id,
+                                "transcript_id": transcript_id,
+                                "exon_number": str(exon_number),
+                            }
+                        ),
+                    ]
+                    derived_records.append((local_start, local_end, 0, fields))
+
+                cds_children = [fields for fields in children if fields[2] == "CDS"]
+                cds_order = sorted(
+                    cds_children,
+                    key=lambda fields: (safe_int(fields[3]), safe_int(fields[4])),
+                    reverse=strand == "-",
+                )
+                cds_numbers = {id(fields): index for index, fields in enumerate(cds_order, 1)}
+                for child in cds_children:
+                    cds_number = cds_numbers[id(child)]
+                    local_start, local_end = convert(safe_int(child[3]), safe_int(child[4]))
+                    child_attrs = parse_gff_attributes(child[8])
+                    child_attrs.pop("Parent", None)
+                    child_attrs.pop("ID", None)
+                    fields = [
+                        seqid,
+                        child[1],
+                        "CDS",
+                        str(local_start),
+                        str(local_end),
+                        child[5],
+                        strand,
+                        child[7],
+                        format_gff_attributes(
+                            {
+                                "ID": f"{transcript_id}.cds{cds_number}",
+                                "Parent": transcript_id,
+                                "gene_id": locus_id,
+                                "transcript_id": transcript_id,
+                                **child_attrs,
+                            }
+                        ),
+                    ]
+                    derived_records.append((local_start, local_end, 1, fields))
+
+                stop_children = [fields for fields in children if fields[2] == "stop_codon"]
+                stop_order = sorted(
+                    stop_children,
+                    key=lambda fields: (safe_int(fields[3]), safe_int(fields[4])),
+                    reverse=strand == "-",
+                )
+                stop_numbers = {id(fields): index for index, fields in enumerate(stop_order, 1)}
+                for child in stop_children:
+                    stop_number = stop_numbers[id(child)]
+                    local_start, local_end = convert(safe_int(child[3]), safe_int(child[4]))
+                    child_attrs = parse_gff_attributes(child[8])
+                    child_attrs.pop("Parent", None)
+                    child_attrs.pop("ID", None)
+                    fields = [
+                        seqid,
+                        child[1],
+                        "stop_codon",
+                        str(local_start),
+                        str(local_end),
+                        child[5],
+                        strand,
+                        child[7],
+                        format_gff_attributes(
+                            {
+                                "ID": f"{transcript_id}.stop{stop_number}",
+                                "Parent": transcript_id,
+                                "gene_id": locus_id,
+                                "transcript_id": transcript_id,
+                                **child_attrs,
+                            }
+                        ),
+                    ]
+                    derived_records.append((local_start, local_end, 2, fields))
+
+                for intron_start, intron_end, intron_number in introns:
+                    local_start, local_end = convert(intron_start, intron_end)
+                    fields = [
+                        seqid,
+                        PROGRAM,
+                        "intron",
+                        str(local_start),
+                        str(local_end),
+                        ".",
+                        strand,
+                        ".",
+                        format_gff_attributes(
+                            {
+                                "ID": f"{transcript_id}.intron{intron_number}",
+                                "Parent": transcript_id,
+                                "gene_id": locus_id,
+                                "transcript_id": transcript_id,
+                                "intron_number": str(intron_number),
+                            }
+                        ),
+                    ]
+                    derived_records.append((local_start, local_end, 3, fields))
+
+                for _, _, _, fields in sorted(
+                    derived_records, key=lambda record: (record[0], record[1], record[2])
+                ):
+                    output.write("\t".join(fields) + "\n")
+
+    os.replace(best_gff_tmp, best_gff)
+    os.replace(gene_gff_tmp, gene_gff)
+    return {"exons": exon_total, "introns": intron_total}
+
+
 def parse_and_filter_hits(
     raw_gff: Path,
     reference_map_tsv: Path,
@@ -691,6 +1032,7 @@ def parse_and_filter_hits(
     all_hits_tsv: Path,
     best_loci_tsv: Path,
     best_gff: Path,
+    gene_gff: Path,
     hit_contig_ids: Path,
     query_summary_tsv: Path,
     contig_summary_tsv: Path,
@@ -756,6 +1098,7 @@ def parse_and_filter_hits(
             hits.append(
                 {
                     "sample_id": sample,
+                    "organism_type": args.organism_type,
                     "model_id": model_id,
                     "query_id": query_id,
                     "original_id": metadata.get("original_id", ""),
@@ -784,6 +1127,7 @@ def parse_and_filter_hits(
 
     all_columns = [
         "sample_id",
+        "organism_type",
         "model_id",
         "query_id",
         "original_id",
@@ -866,6 +1210,7 @@ def parse_and_filter_hits(
 
     best_columns = [
         "sample_id",
+        "organism_type",
         "locus_id",
         "model_id",
         "query_id",
@@ -895,36 +1240,13 @@ def parse_and_filter_hits(
     ]
     write_tsv(best_loci_tsv, best_loci, best_columns)
 
-    selected_by_model = {item["model_id"]: item for item in best_loci}
-    best_gff_tmp = best_gff.with_name(best_gff.name + ".tmp")
-    with open(raw_gff, "r", encoding="utf-8", errors="replace") as source, open(
-        best_gff_tmp, "w", encoding="utf-8"
-    ) as output:
-        output.write("##gff-version 3\n")
-        for raw in source:
-            if raw.startswith("#"):
-                continue
-            fields = raw.rstrip("\n").split("\t")
-            if len(fields) != 9:
-                continue
-            attrs = parse_gff_attributes(fields[8])
-            if fields[2] == "mRNA":
-                model_id = attrs.get("ID", "")
-                selected = selected_by_model.get(model_id)
-                if selected is None:
-                    continue
-                attrs["Locus"] = selected["locus_id"]
-                attrs["ReferenceID"] = selected["original_id"] or selected["query_id"]
-                attrs["Confidence"] = selected["confidence"]
-                attrs["QueryCoverage"] = f"{selected['query_coverage']:.6f}"
-                attrs["ReferenceAnnotation"] = selected["reference_annotation"][:2000]
-                fields[8] = format_gff_attributes(attrs)
-                output.write("\t".join(fields) + "\n")
-            else:
-                parents = [x for x in attrs.get("Parent", "").split(",") if x]
-                if any(parent in selected_by_model for parent in parents):
-                    output.write("\t".join(fields) + "\n")
-    os.replace(best_gff_tmp, best_gff)
+    feature_stats = write_selected_gff_files(
+        raw_gff=raw_gff,
+        best_loci=best_loci,
+        best_gff=best_gff,
+        gene_gff=gene_gff,
+        organism_type=args.organism_type,
+    )
 
     hit_contigs = sorted({item["contig"] for item in best_loci})
     temp_ids = hit_contig_ids.with_name(hit_contig_ids.name + ".tmp")
@@ -1016,6 +1338,7 @@ def parse_and_filter_hits(
         "mapped_queries": len(raw_by_query),
         "passing_queries": len(pass_by_query),
         "total_queries": len(reference),
+        **feature_stats,
     }
 
 
@@ -1023,17 +1346,38 @@ def extract_hit_contigs(
     contigs_fasta: Path,
     wanted_ids_path: Path,
     output_fasta: Path,
+    best_loci_tsv: Path,
+    gene_fasta: Path,
+    organism_type: str,
 ) -> dict[str, Any]:
     with open(wanted_ids_path, "r", encoding="utf-8") as handle:
         wanted = {line.strip() for line in handle if line.strip()}
 
+    loci_by_contig: dict[str, list[dict[str, str]]] = defaultdict(list)
+    with open(best_loci_tsv, "r", encoding="utf-8") as handle:
+        for row in csv.DictReader(handle, delimiter="\t"):
+            loci_by_contig[row["contig"]].append(row)
+    for records in loci_by_contig.values():
+        records.sort(
+            key=lambda row: (
+                safe_int(row["start"]),
+                safe_int(row["end"]),
+                row["locus_id"],
+            )
+        )
+
     output_tmp = output_fasta.with_name(output_fasta.name + ".tmp")
+    gene_tmp = gene_fasta.with_name(gene_fasta.name + ".tmp")
     found: set[str] = set()
     duplicate_ids: set[str] = set()
     scanned = 0
     written_bases = 0
+    written_genes = 0
+    written_gene_bases = 0
 
-    with open(output_tmp, "w", encoding="utf-8") as output:
+    with open(output_tmp, "w", encoding="utf-8") as output, open(
+        gene_tmp, "w", encoding="utf-8"
+    ) as gene_output:
         for header, sequence in read_fasta(contigs_fasta):
             scanned += 1
             seq_id = header.split(maxsplit=1)[0]
@@ -1047,24 +1391,63 @@ def extract_hit_contigs(
             output.write(f">{header}\n")
             write_wrapped(output, sequence)
 
+            for locus in loci_by_contig.get(seq_id, []):
+                start = safe_int(locus["start"])
+                end = safe_int(locus["end"])
+                if start < 1 or end < start or end > len(sequence):
+                    output_tmp.unlink(missing_ok=True)
+                    gene_tmp.unlink(missing_ok=True)
+                    raise RuntimeError(
+                        f"Gene coordinates are outside contig {seq_id} (length {len(sequence)}): "
+                        f"{locus['locus_id']}={start}-{end}"
+                    )
+                gene_sequence = sequence[start - 1 : end]
+                expected_length = end - start + 1
+                if len(gene_sequence) != expected_length:
+                    raise AssertionError(
+                        f"Internal coordinate error for {locus['locus_id']}: "
+                        f"expected {expected_length}, extracted {len(gene_sequence)}"
+                    )
+                gene_output.write(
+                    f">{locus['locus_id']} source_contig={seq_id} source_start={start} "
+                    f"source_end={end} source_strand={locus['strand']} "
+                    f"organism_type={organism_type}\n"
+                )
+                write_wrapped(gene_output, gene_sequence)
+                written_genes += 1
+                written_gene_bases += len(gene_sequence)
+
     missing = wanted - found
     if missing:
         output_tmp.unlink(missing_ok=True)
+        gene_tmp.unlink(missing_ok=True)
         example = ", ".join(sorted(missing)[:10])
         raise RuntimeError(
             f"{len(missing)} hit contig IDs were absent from the input FASTA. Examples: {example}"
         )
     if duplicate_ids:
         output_tmp.unlink(missing_ok=True)
+        gene_tmp.unlink(missing_ok=True)
         example = ", ".join(sorted(duplicate_ids)[:10])
         raise RuntimeError(f"Duplicate contig identifiers detected. Examples: {example}")
 
+    if written_genes != sum(len(records) for records in loci_by_contig.values()):
+        output_tmp.unlink(missing_ok=True)
+        gene_tmp.unlink(missing_ok=True)
+        raise RuntimeError(
+            f"Expected {sum(len(records) for records in loci_by_contig.values())} gene sequences "
+            f"but extracted {written_genes}"
+        )
+
     os.replace(output_tmp, output_fasta)
+    os.replace(gene_tmp, gene_fasta)
     return {
         "requested_contigs": len(wanted),
         "found_contigs": len(found),
         "scanned_contigs": scanned,
         "written_bases": written_bases,
+        "written_genes": written_genes,
+        "written_gene_bases": written_gene_bases,
     }
 
 
@@ -1107,9 +1490,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="meta_homologous_gene_annot.py",
         description=(
-            "Map reference proteins to one metagenomic assembly with splice-aware "
-            "miniprot alignment, retain high-quality gene models, and export concise "
-            "annotation and sequence files."
+            "Map reference proteins to one metagenomic assembly with miniprot, retain "
+            "high-quality gene models, and export contig-coordinate plus standalone-gene "
+            "GFF3/FASTA references."
         ),
         epilog=r"""
 Example:
@@ -1118,6 +1501,7 @@ Example:
       --contigs 201704_MF1.fasta.gz \
       --outdir 201704_MF1.phi_scan \
       --sample 201704_MF1 \
+      --organism_type eukaryote \
       --threads 24
 
 Resume is automatic. Use --force to discard compatible checkpoints and rerun.
@@ -1158,6 +1542,15 @@ Resume is automatic. Use --force to discard compatible checkpoints and rerun.
         default=None,
         metavar="NAME",
         help="Sample name. Default: inferred from contig filename.",
+    )
+    optional.add_argument(
+        "--organism_type",
+        choices=("eukaryote", "prokaryote"),
+        default="eukaryote",
+        help=(
+            "Annotation mode. Eukaryote enables splice-aware alignment and introns; "
+            "prokaryote disables splicing and omits introns. Default: eukaryote."
+        ),
     )
     optional.add_argument(
         "-t",
@@ -1205,11 +1598,20 @@ Resume is automatic. Use --force to discard compatible checkpoints and rerun.
     optional.add_argument(
         "--skip_sequence_export",
         action="store_true",
-        help="Do not run gffread or export CDS/protein/transcript FASTA files.",
+        help=(
+            "Do not run gffread or export CDS/protein/transcript FASTA files. "
+            "The standalone gene FASTA is still generated."
+        ),
     )
 
     alignment = parser.add_argument_group("miniprot alignment")
-    alignment.add_argument("--splice_model", type=int, choices=(0, 1, 2), default=1)
+    alignment.add_argument(
+        "--splice_model",
+        type=int,
+        choices=(0, 1, 2),
+        default=None,
+        help="Eukaryotic splice model. Default: 1; omit or set 0 in prokaryote mode.",
+    )
     alignment.add_argument("--max_intron", type=int, default=20_000, metavar="BP")
     alignment.add_argument("--index_subsample", type=int, default=1, metavar="INT")
     alignment.add_argument("--max_hits", type=int, default=50, metavar="INT")
@@ -1275,6 +1677,15 @@ def validate_args(args: argparse.Namespace) -> None:
         args.compression_threads = min(args.threads, 8)
     if args.compression_threads < 1:
         raise ValueError("--compression_threads must be >= 1")
+    if args.organism_type == "eukaryote":
+        if args.splice_model is None:
+            args.splice_model = 1
+    else:
+        if args.splice_model not in (None, 0):
+            raise ValueError(
+                "--splice_model is not used for prokaryotes; omit it or set it to 0"
+            )
+        args.splice_model = 0
     if args.max_intron < 1 or args.max_hits < 1 or args.index_subsample < 0:
         raise ValueError("Invalid miniprot integer parameter")
     for name in (
@@ -1314,6 +1725,8 @@ def output_paths(outdir: Path, sample: str) -> dict[str, Path]:
         "all_hits": Path(str(prefix) + ".all_hits.tsv"),
         "best_loci": Path(str(prefix) + ".best_loci.tsv"),
         "best_gff": Path(str(prefix) + ".best_loci.gff3"),
+        "gene_gff": Path(str(prefix) + ".gene.gff3"),
+        "gene_fasta": Path(str(prefix) + ".gene.fasta"),
         "hit_ids": Path(str(prefix) + ".hit_contig_ids.txt"),
         "query_summary": Path(str(prefix) + ".query_summary.tsv"),
         "contig_summary": Path(str(prefix) + ".contig_summary.tsv"),
@@ -1351,6 +1764,7 @@ def print_parameter_table(
         ("contigs", str(args.contigs)),
         ("contig file size", human_bytes(args.contigs.stat().st_size)),
         ("outdir", str(args.outdir)),
+        ("organism type", args.organism_type),
         ("threads", str(args.threads)),
         ("compression threads", str(args.compression_threads)),
         ("min identity", f"{args.min_identity:.3f}"),
@@ -1377,11 +1791,15 @@ def stage_outputs(paths: dict[str, Path], skip_sequence_export: bool) -> dict[st
             paths["all_hits"],
             paths["best_loci"],
             paths["best_gff"],
+            paths["gene_gff"],
             paths["hit_ids"],
             paths["query_summary"],
             paths["contig_summary"],
         ],
-        "extract_contigs": [Path(str(paths["hit_contigs"]) + ".gz")],
+        "extract_contigs": [
+            Path(str(paths["hit_contigs"]) + ".gz"),
+            paths["gene_fasta"],
+        ],
         "export_sequences": [],
         "finalize": [paths["summary"], paths["metadata"], paths["metrics"], paths["done"]],
     }
@@ -1446,6 +1864,18 @@ def summarize_best_loci_tsv(path: Path) -> dict[str, int]:
         "medium_confidence_loci": medium,
         "hit_contigs": len(contigs),
     }
+
+
+def summarize_gff_features(path: Path) -> dict[str, int]:
+    counts: Counter[str] = Counter()
+    with open(path, "r", encoding="utf-8") as handle:
+        for raw in handle:
+            if not raw or raw.startswith("#"):
+                continue
+            fields = raw.rstrip("\r\n").split("\t")
+            if len(fields) == 9:
+                counts[fields[2]] += 1
+    return {"exons": counts["exon"], "introns": counts["intron"]}
 
 
 def main() -> int:
@@ -1605,14 +2035,12 @@ def main() -> int:
             else:
                 timer = StageTimer(stage)
                 raw_tmp = workdir / f"{sample}.miniprot.raw.gff3"
+                annotation_options = miniprot_annotation_options(args)
                 command = [
                     miniprot,
                     "-t",
                     str(args.threads),
-                    "-j",
-                    str(args.splice_model),
-                    "-G",
-                    str(args.max_intron),
+                    *annotation_options,
                     "-N",
                     str(args.max_hits),
                     "-p",
@@ -1623,7 +2051,7 @@ def main() -> int:
                     str(args.min_score_ratio),
                     "--outc",
                     str(args.prefilter_query_coverage),
-                    "--gff-only",
+                    "--gff",
                     "--gff-delim",
                     "@",
                     *shlex.split(args.miniprot_extra),
@@ -1654,6 +2082,7 @@ def main() -> int:
                     all_hits_tsv=paths["all_hits"],
                     best_loci_tsv=paths["best_loci"],
                     best_gff=paths["best_gff"],
+                    gene_gff=paths["gene_gff"],
                     hit_contig_ids=paths["hit_ids"],
                     query_summary_tsv=paths["query_summary"],
                     contig_summary_tsv=paths["contig_summary"],
@@ -1673,7 +2102,12 @@ def main() -> int:
             else:
                 timer = StageTimer(stage)
                 extraction_stats = extract_hit_contigs(
-                    args.contigs, paths["hit_ids"], paths["hit_contigs"]
+                    args.contigs,
+                    paths["hit_ids"],
+                    paths["hit_contigs"],
+                    paths["best_loci"],
+                    paths["gene_fasta"],
+                    args.organism_type,
                 )
                 compressed = compress_with_pigz(
                     paths["hit_contigs"],
@@ -1683,10 +2117,10 @@ def main() -> int:
                     keep_source=args.keep_uncompressed,
                 )
                 metric = timer.finish("completed", json.dumps(extraction_stats, sort_keys=True))
-                state.mark_completed(metric, [compressed])
+                state.mark_completed(metric, [compressed, paths["gene_fasta"]])
                 logger.success(
                     f"Extracted {extraction_stats['found_contigs']:,} contigs "
-                    f"({human_bytes(extraction_stats['written_bases'])} nucleotide sequence)"
+                    f"and {extraction_stats['written_genes']:,} standalone genes"
                 )
             progress.advance(task)
 
@@ -1764,6 +2198,7 @@ def main() -> int:
 
                 if not parse_stats:
                     parse_stats = summarize_best_loci_tsv(paths["best_loci"])
+                    parse_stats.update(summarize_gff_features(paths["best_gff"]))
 
                 stage_wall_total = sum(
                     float(record.get("wall_seconds", 0.0))
@@ -1771,6 +2206,7 @@ def main() -> int:
                 )
                 summary = {
                     "sample_id": sample,
+                    "organism_type": args.organism_type,
                     "proteins_input": str(args.proteins),
                     "contigs_input": str(args.contigs),
                     "contig_file_bytes": args.contigs.stat().st_size,
@@ -1778,6 +2214,8 @@ def main() -> int:
                     "high_confidence_loci": parse_stats.get("high_confidence_loci", 0),
                     "medium_confidence_loci": parse_stats.get("medium_confidence_loci", 0),
                     "hit_contigs": parse_stats.get("hit_contigs", 0),
+                    "exons": parse_stats.get("exons", 0),
+                    "introns": parse_stats.get("introns", 0),
                     "threads": args.threads,
                     "completed_at": iso_now(),
                     "completed_stage_wall_seconds": round(stage_wall_total, 3),
