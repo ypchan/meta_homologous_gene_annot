@@ -118,6 +118,16 @@ class GeneReferenceOutputTests(unittest.TestCase):
         self.assertNotIn("\tintron\t", paths["best.gff3"].read_text(encoding="utf-8"))
         self.assertNotIn("\tintron\t", paths["gene.gff3"].read_text(encoding="utf-8"))
 
+    def test_gffread_input_excludes_paf_directives_but_keeps_features(self):
+        compatible = self.root / "gffread.gff3"
+        removed = app.write_gffread_compatible_gff(self.raw_gff, compatible)
+        text = compatible.read_text(encoding="utf-8")
+        self.assertEqual(removed, 2)
+        self.assertNotIn("##PAF", text)
+        self.assertIn("##gff-version 3", text)
+        self.assertIn("\tmRNA\t", text)
+        self.assertIn("\tCDS\t", text)
+
     def test_organism_type_selects_miniprot_splicing_options(self):
         eukaryote = SimpleNamespace(
             organism_type="euk", splice_model=1, max_intron=20_000

@@ -299,14 +299,17 @@ The pipeline deliberately uses `--gff`, not `--gff-only`. The `##PAF` line befor
 Sequence export:
 
 ```bash
-gffread -E sample01.best_loci.gff3 \
+awk '!/^##PAF/' sample01.best_loci.gff3 \
+  > sample01.gffread.gff3
+
+gffread -E sample01.gffread.gff3 \
   -g sample01.hit_contigs.fasta \
   -x sample01.genes.cds.fasta \
   -y sample01.genes.protein.fasta \
   -w sample01.genes.transcript.fasta
 ```
 
-`-x`, `-y`, and `-w` write CDS, protein, and spliced transcript sequences, respectively. The program then compresses them with `pigz -p THREADS -c`.
+The published `sample01.best_loci.gff3` retains its detailed miniprot `##PAF` records. Some gffread releases attempt to parse these tab-delimited directive lines as ordinary GFF features and fail with `unexpected tab character` or `Error parsing feature score`. The pipeline therefore removes only `##PAF` lines from a temporary gffread input while leaving the published GFF3 unchanged. `-x`, `-y`, and `-w` write CDS, protein, and spliced transcript sequences, respectively. The program then compresses them with `pigz -p THREADS -c`.
 
 ## Cross-Sample Dereplication
 
@@ -589,7 +592,7 @@ tail -n 50 results/sample01/sample01.miniprot.map.log
 tail -n 50 results/sample01/sample01.gffread.log
 ```
 
-Do not run two processes with the same `--outdir` and `--sample` simultaneously. If gffread fails, first confirm that GFF3 SeqIDs match the hit-contig FASTA IDs. No hits or no loci passing the filters is a valid result; the program writes empty gene/sequence files and complete summaries. Inspect `fail_reason` in `all_hits.tsv` before changing thresholds, and do not lower thresholds only to obtain a positive result.
+Do not run two processes with the same `--outdir` and `--sample` simultaneously. If gffread reports an error on a `##PAF` line, update the program and repeat the original command; completed compatible stages are resumed and the new PAF-free temporary GFF3 is used only for sequence export. For other gffread failures, confirm that GFF3 SeqIDs match the hit-contig FASTA IDs. No hits or no loci passing the filters is a valid result; the program writes empty gene/sequence files and complete summaries. Inspect `fail_reason` in `all_hits.tsv` before changing thresholds, and do not lower thresholds only to obtain a positive result.
 
 ## References
 
@@ -606,6 +609,7 @@ Do not run two processes with the same `--outdir` and `--sample` simultaneously.
 
 ### 1.1.0
 
+- Added a PAF-free temporary GFF3 for gffread while retaining `##PAF` alignment details in published GFF3 output.
 - Added `pyproject.toml` for standard and editable pip installation and the `meta-homologous-gene-annot` console command.
 - Added `--organism_type {euk,prok}`; `prok` mode passes miniprot `-S` to disable splicing.
 - Preserved selected miniprot `##PAF` alignment details in raw and filtered GFF3 output.

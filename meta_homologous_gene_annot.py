@@ -1481,6 +1481,22 @@ def write_summary_tsv(path: Path, summary: dict[str, Any]) -> None:
     os.replace(temp, path)
 
 
+def write_gffread_compatible_gff(source: Path, destination: Path) -> int:
+    """Copy GFF3 features while removing miniprot PAF directives."""
+    temp = destination.with_name(destination.name + ".tmp")
+    removed = 0
+    with open(source, "r", encoding="utf-8", errors="replace") as input_handle, open(
+        temp, "w", encoding="utf-8", newline=""
+    ) as output_handle:
+        for line in input_handle:
+            if line.startswith("##PAF"):
+                removed += 1
+                continue
+            output_handle.write(line)
+    os.replace(temp, destination)
+    return removed
+
+
 def parse_organism_type(value: str) -> str:
     """Normalize the short values and legacy long spellings."""
     normalized = {
@@ -2260,11 +2276,19 @@ def main() -> int:
 
                 has_loci = paths["hit_ids"].exists() and paths["hit_ids"].stat().st_size > 0
                 if has_loci:
+                    gffread_input = workdir / f"{sample}.gffread.gff3"
+                    removed_paf = write_gffread_compatible_gff(
+                        paths["best_gff"], gffread_input
+                    )
+                    logger.info(
+                        f"Prepared gffread-compatible GFF3 without "
+                        f"{removed_paf:,} ##PAF directive(s): {gffread_input}"
+                    )
                     run_external(
                         [
                             gffread,
                             "-E",
-                            str(paths["best_gff"]),
+                            str(gffread_input),
                             "-g",
                             str(hit_contigs_uncompressed),
                             "-x",
@@ -2278,6 +2302,7 @@ def main() -> int:
                         stdout_path=None,
                         stderr_path=paths["gffread_log"],
                     )
+                    gffread_input.unlink(missing_ok=True)
                 else:
                     logger.warning("No passing loci; creating empty sequence FASTA outputs")
                     for fasta_path in (paths["cds"], paths["proteins"], paths["transcripts"]):
