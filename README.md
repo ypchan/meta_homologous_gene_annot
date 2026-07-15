@@ -51,43 +51,96 @@ The annotation pipeline requires:
 
 `--skip_sequence_export` skips the gffread CDS, protein, and transcript outputs. `sample.gene.fasta` and both GFF3 files are still generated.
 
-The following conda/mamba environment includes both annotation and downstream quantification tools:
+Install the Python dependencies with `pip` in a virtual environment:
 
 ```bash
-mamba create -n meta_gene \
-  -c conda-forge -c bioconda \
-  python=3.11 rich rich-argparse \
-  miniprot gffread pigz cd-hit minibwa minimap2 samtools subread coverm
-conda activate meta_gene
+gh repo clone ypchan/meta_homologous_gene_annot
+cd meta_homologous_gene_annot
+
+python3 -m venv .venv
+source .venv/bin/activate
+python3 -m pip install --upgrade pip
+python3 -m pip install -r requirements.txt
 ```
 
-To install only the Python dependencies:
+For an existing checkout, start with `python3 -m venv .venv` in the repository root. Reactivate the environment in a new shell with `source .venv/bin/activate`.
 
-```bash
-python3 -m pip install --user --upgrade -r requirements.txt
-```
+The external bioinformatics programs are compiled executables and cannot be installed with `pip`. Install the GitHub CLI, a C/C++ build toolchain, GNU Make, zlib development headers, and the other system libraries required by the upstream projects. Rust and Cargo are required only for CoverM. The commands below clone the official repositories with `gh repo clone` and install executables under `$HOME/.local/bin`.
 
-Core tools can also be built from source:
+### Annotation and Mapping Tools
 
 ```bash
 mkdir -p "$HOME/src" "$HOME/.local/bin"
 
-git clone https://github.com/lh3/miniprot.git "$HOME/src/miniprot"
+gh repo clone lh3/miniprot "$HOME/src/miniprot"
 make -C "$HOME/src/miniprot"
 install -m 0755 "$HOME/src/miniprot/miniprot" "$HOME/.local/bin/miniprot"
 
-git clone https://github.com/gpertea/gffread.git "$HOME/src/gffread"
+gh repo clone gpertea/gffread "$HOME/src/gffread"
 make -C "$HOME/src/gffread" release
 install -m 0755 "$HOME/src/gffread/gffread" "$HOME/.local/bin/gffread"
 
-git clone https://github.com/madler/pigz.git "$HOME/src/pigz"
+gh repo clone madler/pigz "$HOME/src/pigz"
 make -C "$HOME/src/pigz"
 install -m 0755 "$HOME/src/pigz/pigz" "$HOME/.local/bin/pigz"
 
-git clone https://github.com/lh3/minibwa.git "$HOME/src/minibwa"
+gh repo clone weizhongli/cdhit "$HOME/src/cdhit"
+make -C "$HOME/src/cdhit" -j 8
+install -m 0755 "$HOME/src/cdhit/cd-hit-est" "$HOME/.local/bin/cd-hit-est"
+
+gh repo clone lh3/minibwa "$HOME/src/minibwa"
 make -C "$HOME/src/minibwa"
 install -m 0755 "$HOME/src/minibwa/minibwa" "$HOME/.local/bin/minibwa"
 
+gh repo clone lh3/minimap2 "$HOME/src/minimap2"
+make -C "$HOME/src/minimap2" -j 8
+install -m 0755 "$HOME/src/minimap2/minimap2" "$HOME/.local/bin/minimap2"
+install -m 0755 "$HOME/src/minimap2/misc/paftools.js" "$HOME/.local/bin/paftools.js"
+
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+The eukaryotic RNA example also calls `paftools.js`, which requires the `k8` JavaScript shell. Install the matching `k8` binary from the official minimap2 release assets, or replace that junction-conversion step with another GFF3-aware splice-junction converter.
+
+### Quantification Tools
+
+featureCounts is built as part of Subread:
+
+```bash
+gh repo clone ShiLab-Bioinformatics/subread "$HOME/src/subread"
+make -C "$HOME/src/subread/src" -f Makefile.Linux -j 8
+install -m 0755 "$HOME/src/subread/bin/featureCounts" "$HOME/.local/bin/featureCounts"
+```
+
+Build HTSlib and samtools from adjacent GitHub checkouts. A Git checkout of HTSlib requires its submodules plus Autoconf/Automake. HTSlib also requires zlib and normally uses bzip2, xz/liblzma, libcurl, and libdeflate development libraries.
+
+```bash
+gh repo clone samtools/htslib "$HOME/src/htslib" -- --recurse-submodules
+cd "$HOME/src/htslib"
+autoreconf -i
+./configure --prefix="$HOME/.local"
+make -j 8
+make install
+
+gh repo clone samtools/samtools "$HOME/src/samtools"
+cd "$HOME/src/samtools"
+autoheader
+autoconf -Wno-syntax
+./configure --prefix="$HOME/.local" --with-htslib="$HOME/src/htslib"
+make -j 8
+make install
+```
+
+Build CoverM from its cloned Rust source tree:
+
+```bash
+gh repo clone wwood/CoverM "$HOME/src/CoverM"
+cargo install --locked --path "$HOME/src/CoverM" --root "$HOME/.local"
+```
+
+Ensure the user-local executable directory is available in every shell:
+
+```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
@@ -95,6 +148,8 @@ Check the installed versions and local help because available options can differ
 
 ```bash
 python3 --version
+python3 -m pip --version
+gh --version
 miniprot --version
 gffread --version
 pigz --version
