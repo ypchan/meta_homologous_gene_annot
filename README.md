@@ -7,6 +7,31 @@
 
 The program supports eukaryotic and prokaryotic modes. Eukaryotic mode performs splice-aware alignment and writes `exon` and `intron` features. Prokaryotic mode disables miniprot splicing and omits `intron` features. These outputs are homology-supported candidate gene models; they are not taxonomic identification, evidence of pathogenicity, or a replacement for complete de novo gene annotation.
 
+## Table of Contents
+
+- [Core Output Design](#core-output-design)
+- [Requirements and Installation](#requirements-and-installation)
+- [Inputs](#inputs)
+- [Annotation Examples](#annotation-examples)
+- [Main Parameters](#main-parameters)
+- [External Commands Used by the Pipeline](#external-commands-used-by-the-pipeline)
+- [Cross-Sample Dereplication](#cross-sample-dereplication)
+  - [Combine Per-Sample Gene FASTA and GFF3 Files](#1-combine-per-sample-gene-fasta-and-gff3-files)
+  - [Prokaryotes: Dereplicate Genomic Genes Directly](#2a-prokaryotes-dereplicate-genomic-genes-directly)
+  - [Eukaryotes: Prefer Dereplication of Spliced Transcripts](#2b-eukaryotes-prefer-dereplication-of-spliced-transcripts)
+  - [Generate the Nonredundant Gene GFF3](#3-generate-the-nonredundant-gene-gff3)
+- [Read Mapping and Abundance Quantification](#read-mapping-and-abundance-quantification)
+  - [minimap2 for Short Metagenomic Reads](#a-minimap2-for-short-metagenomic-reads)
+  - [minibwa for Short Metagenomic Reads](#b-minibwa-for-short-metagenomic-reads)
+  - [Splice-Aware minimap2 for Eukaryotic Metatranscriptomes](#c-splice-aware-minimap2-for-eukaryotic-metatranscriptomes)
+  - [featureCounts for Eukaryotic DNA Abundance and RNA Expression](#d-featurecounts-for-eukaryotic-dna-abundance-and-rna-expression)
+  - [CoverM for Prokaryotic Gene-Level DNA or RNA Abundance](#e-coverm-for-prokaryotic-gene-level-dna-or-rna-abundance)
+- [Boundary Alignment and Quantification Bias](#boundary-alignment-and-quantification-bias)
+- [Checkpointing and Troubleshooting](#checkpointing-and-troubleshooting)
+- [References](#references)
+- [Changelog](#changelog)
+- [License](#license)
+
 ## Core Output Design
 
 The table below assumes a sample name of `sample01`.
