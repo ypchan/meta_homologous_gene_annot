@@ -57,7 +57,7 @@ class GeneReferenceOutputTests(unittest.TestCase):
             organism_type=organism_type,
         )
 
-    def run_parse(self, organism_type="eukaryote"):
+    def run_parse(self, organism_type="euk"):
         paths = {
             name: self.root / f"{organism_type}.{name}"
             for name in (
@@ -86,7 +86,7 @@ class GeneReferenceOutputTests(unittest.TestCase):
         return paths, stats
 
     def test_eukaryote_gff_has_alignment_gene_exon_and_intron(self):
-        paths, stats = self.run_parse("eukaryote")
+        paths, stats = self.run_parse("euk")
         with open(paths["best.tsv"], "r", encoding="utf-8") as handle:
             loci = {row["contig"]: row["locus_id"] for row in csv.DictReader(handle, delimiter="\t")}
         self.assertEqual(stats["selected_loci"], 2)
@@ -112,7 +112,7 @@ class GeneReferenceOutputTests(unittest.TestCase):
         self.assertNotIn("##PAF", gene_gff)
 
     def test_prokaryote_gff_omits_introns(self):
-        paths, stats = self.run_parse("prokaryote")
+        paths, stats = self.run_parse("prok")
         self.assertEqual(stats["exons"], 4)
         self.assertEqual(stats["introns"], 0)
         self.assertNotIn("\tintron\t", paths["best.gff3"].read_text(encoding="utf-8"))
@@ -120,10 +120,10 @@ class GeneReferenceOutputTests(unittest.TestCase):
 
     def test_organism_type_selects_miniprot_splicing_options(self):
         eukaryote = SimpleNamespace(
-            organism_type="eukaryote", splice_model=1, max_intron=20_000
+            organism_type="euk", splice_model=1, max_intron=20_000
         )
         prokaryote = SimpleNamespace(
-            organism_type="prokaryote", splice_model=0, max_intron=20_000
+            organism_type="prok", splice_model=0, max_intron=20_000
         )
         self.assertEqual(
             app.miniprot_annotation_options(eukaryote), ["-j", "1", "-G", "20000"]
@@ -131,7 +131,7 @@ class GeneReferenceOutputTests(unittest.TestCase):
         self.assertEqual(app.miniprot_annotation_options(prokaryote), ["-S"])
 
     def test_gene_fasta_uses_exact_one_based_inclusive_span(self):
-        paths, _ = self.run_parse("eukaryote")
+        paths, _ = self.run_parse("euk")
         contigs = self.root / "contigs.fasta"
         plus = "ACGT" * 15
         minus = "AAAACCCCGGGGTTTT" * 4
@@ -146,7 +146,7 @@ class GeneReferenceOutputTests(unittest.TestCase):
             hit_contigs,
             paths["best.tsv"],
             gene_fasta,
-            "eukaryote",
+            "euk",
         )
         self.assertEqual(stats["written_genes"], 2)
         records = {header.split()[0]: sequence for header, sequence in app.read_fasta(gene_fasta)}
@@ -158,7 +158,7 @@ class GeneReferenceOutputTests(unittest.TestCase):
 
     def test_no_hits_produces_valid_empty_gene_reference(self):
         self.raw_gff.write_text("##gff-version 3\n", encoding="utf-8")
-        paths, stats = self.run_parse("eukaryote")
+        paths, stats = self.run_parse("euk")
         self.assertEqual(stats["selected_loci"], 0)
         self.assertEqual(paths["gene.gff3"].read_text(encoding="utf-8"), "##gff-version 3\n")
         self.assertEqual(paths["ids.txt"].read_text(encoding="utf-8"), "")
@@ -172,10 +172,41 @@ class GeneReferenceOutputTests(unittest.TestCase):
             self.root / "empty.hit_contigs.fasta",
             paths["best.tsv"],
             gene_fasta,
-            "eukaryote",
+            "euk",
         )
         self.assertEqual(extraction["written_genes"], 0)
         self.assertEqual(gene_fasta.read_text(encoding="utf-8"), "")
+
+
+class CommandLineTests(unittest.TestCase):
+    @staticmethod
+    def parse(*extra):
+        return app.build_parser().parse_args(
+            ["-p", "proteins.faa", "-c", "contigs.fa", "-o", "results", *extra]
+        )
+
+    def test_organism_type_uses_short_values_and_normalizes_legacy_values(self):
+        self.assertEqual(self.parse().organism_type, "euk")
+        self.assertEqual(self.parse("--organism_type", "prok").organism_type, "prok")
+        self.assertEqual(
+            self.parse("--organism_type", "eukaryote").organism_type, "euk"
+        )
+        self.assertEqual(
+            self.parse("--organism_type", "prokaryote").organism_type, "prok"
+        )
+
+    def test_every_optional_runtime_parameter_documents_its_default(self):
+        parser = app.build_parser()
+        exempt = {"help", "help_input", "help_default"}
+        missing = [
+            action.dest
+            for action in parser._actions
+            if action.option_strings
+            and not action.required
+            and action.dest not in exempt
+            and "Default:" not in (action.help or "")
+        ]
+        self.assertEqual(missing, [])
 
 
 if __name__ == "__main__":

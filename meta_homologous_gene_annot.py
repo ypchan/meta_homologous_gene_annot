@@ -108,9 +108,9 @@ INPUT FORMAT
    directory is used temporarily. Existing compatible results can be resumed.
 
 4. --organism_type
-   Use "eukaryote" for splice-aware annotation (the default) or "prokaryote"
-   to disable miniprot splicing. Eukaryotic GFF3 contains inferred introns;
-   prokaryotic GFF3 contains exon/CDS features but no intron features.
+   Use "euk" for splice-aware annotation (the default) or "prok" to disable
+   miniprot splicing. Eukaryotic GFF3 contains inferred introns; prokaryotic
+   GFF3 contains exon/CDS features but no intron features.
 
 Typical command
 ---------------
@@ -119,7 +119,7 @@ python3 meta_homologous_gene_annot.py \
     --contigs /share/data02/project/chenyanpeng/mangrove_2017_2025/01_contigs/201704_MF1.fasta.gz \
     --outdir 15_phibase/201704_MF1 \
     --sample 201704_MF1 \
-    --organism_type eukaryote \
+    --organism_type euk \
     --threads 24
 """
 
@@ -129,9 +129,9 @@ DEFAULT PARAMETERS
 
 Alignment
 ---------
-organism_type           eukaryote
+organism_type           euk
 threads                 available CPUs, capped at 32 when not specified
-splice_model            1 for eukaryote; splicing disabled for prokaryote
+splice_model            1 for euk; splicing disabled for prok
 max_intron               20000  maximum intron length in bp
 index_subsample          1      miniprot -M; k-mer sampling rate is 1/2**M
 max_hits                 50     retained/output alignments per query protein
@@ -467,7 +467,7 @@ def detect_threads() -> int:
 
 
 def miniprot_annotation_options(args: argparse.Namespace) -> list[str]:
-    if args.organism_type == "prokaryote":
+    if args.organism_type == "prok":
         return ["-S"]
     return ["-j", str(args.splice_model), "-G", str(args.max_intron)]
 
@@ -835,7 +835,7 @@ def write_selected_gff_files(
             }
 
             introns: list[tuple[int, int, int]] = []
-            if organism_type == "eukaryote":
+            if organism_type == "euk":
                 for left, right in zip(exon_intervals, exon_intervals[1:]):
                     intron_start = left[1] + 1
                     intron_end = right[0] - 1
@@ -1481,6 +1481,19 @@ def write_summary_tsv(path: Path, summary: dict[str, Any]) -> None:
     os.replace(temp, path)
 
 
+def parse_organism_type(value: str) -> str:
+    """Normalize the short values and legacy long spellings."""
+    normalized = {
+        "euk": "euk",
+        "prok": "prok",
+        "eukaryote": "euk",
+        "prokaryote": "prok",
+    }.get(value.lower())
+    if normalized is None:
+        raise argparse.ArgumentTypeError("must be 'euk' or 'prok'")
+    return normalized
+
+
 def build_parser() -> argparse.ArgumentParser:
     RawDescriptionRichHelpFormatter.styles["argparse.args"] = "bold cyan"
     RawDescriptionRichHelpFormatter.styles["argparse.groups"] = "bold dark_orange"
@@ -1506,7 +1519,7 @@ Example:
       --contigs 201704_MF1.fasta.gz \\
       --outdir 201704_MF1.phi_scan \\
       --sample 201704_MF1 \\
-      --organism_type eukaryote \\
+      --organism_type euk \\
       --threads 24
 
 Resume is automatic. Use --force to discard compatible checkpoints and rerun.
@@ -1550,11 +1563,12 @@ Resume is automatic. Use --force to discard compatible checkpoints and rerun.
     )
     optional.add_argument(
         "--organism_type",
-        choices=("eukaryote", "prokaryote"),
-        default="eukaryote",
+        type=parse_organism_type,
+        choices=("euk", "prok"),
+        default="euk",
         help=(
-            "Annotation mode. Eukaryote enables splice-aware alignment and introns; "
-            "prokaryote disables splicing and omits introns. Default: eukaryote."
+            "Annotation mode. euk enables splice-aware alignment and introns; "
+            "prok disables splicing and omits introns. Default: euk."
         ),
     )
     optional.add_argument(
@@ -1588,24 +1602,30 @@ Resume is automatic. Use --force to discard compatible checkpoints and rerun.
     optional.add_argument(
         "--force",
         action="store_true",
-        help="Rerun all stages and overwrite known outputs.",
+        help="Rerun all stages and overwrite known outputs. Default: disabled.",
     )
     optional.add_argument(
         "--keep_index",
         action="store_true",
-        help="Keep the miniprot .mpi index after successful completion.",
+        help=(
+            "Keep the miniprot .mpi index after successful completion. "
+            "Default: disabled."
+        ),
     )
     optional.add_argument(
         "--keep_uncompressed",
         action="store_true",
-        help="Keep uncompressed FASTA outputs in addition to .gz files.",
+        help=(
+            "Keep uncompressed FASTA outputs in addition to .gz files. "
+            "Default: disabled."
+        ),
     )
     optional.add_argument(
         "--skip_sequence_export",
         action="store_true",
         help=(
             "Do not run gffread or export CDS/protein/transcript FASTA files. "
-            "The standalone gene FASTA is still generated."
+            "The standalone gene FASTA is still generated. Default: disabled."
         ),
     )
 
@@ -1615,40 +1635,130 @@ Resume is automatic. Use --force to discard compatible checkpoints and rerun.
         type=int,
         choices=(0, 1, 2),
         default=None,
-        help="Eukaryotic splice model. Default: 1; omit or set 0 in prokaryote mode.",
+        help="Eukaryotic splice model. Default: 1 for euk; disabled for prok.",
     )
-    alignment.add_argument("--max_intron", type=int, default=20_000, metavar="BP")
-    alignment.add_argument("--index_subsample", type=int, default=1, metavar="INT")
-    alignment.add_argument("--max_hits", type=int, default=50, metavar="INT")
-    alignment.add_argument("--secondary_ratio", type=float, default=0.50, metavar="FLOAT")
     alignment.add_argument(
-        "--prefilter_query_coverage", type=float, default=0.30, metavar="FLOAT"
+        "--max_intron",
+        type=int,
+        default=20_000,
+        metavar="BP",
+        help="Maximum intron length in euk mode. Default: 20000.",
     )
-    alignment.add_argument("--min_score_ratio", type=float, default=0.50, metavar="FLOAT")
+    alignment.add_argument(
+        "--index_subsample",
+        type=int,
+        default=1,
+        metavar="INT",
+        help="miniprot -M index subsampling exponent. Default: 1.",
+    )
+    alignment.add_argument(
+        "--max_hits",
+        type=int,
+        default=50,
+        metavar="INT",
+        help="Maximum retained and reported hits per query. Default: 50.",
+    )
+    alignment.add_argument(
+        "--secondary_ratio",
+        type=float,
+        default=0.50,
+        metavar="FLOAT",
+        help="Secondary-hit score ratio relative to the best hit. Default: 0.50.",
+    )
+    alignment.add_argument(
+        "--prefilter_query_coverage",
+        type=float,
+        default=0.30,
+        metavar="FLOAT",
+        help="miniprot query-coverage prefilter. Default: 0.30.",
+    )
+    alignment.add_argument(
+        "--min_score_ratio",
+        type=float,
+        default=0.50,
+        metavar="FLOAT",
+        help="Minimum score relative to the best alignment. Default: 0.50.",
+    )
     alignment.add_argument(
         "--miniprot_extra",
         default="",
         metavar="'OPTIONS'",
-        help="Additional miniprot mapping options parsed with shlex; use cautiously.",
+        help=(
+            "Additional miniprot mapping options parsed with shlex; use cautiously. "
+            "Default: empty."
+        ),
     )
 
     filtering = parser.add_argument_group("final hit filtering")
-    filtering.add_argument("--min_identity", type=float, default=0.40, metavar="FLOAT")
     filtering.add_argument(
-        "--min_query_coverage", type=float, default=0.60, metavar="FLOAT"
+        "--min_identity",
+        type=float,
+        default=0.40,
+        metavar="FLOAT",
+        help="Minimum amino-acid identity. Default: 0.40.",
     )
-    filtering.add_argument("--max_frameshift", type=int, default=1, metavar="INT")
-    filtering.add_argument("--max_stop_codon", type=int, default=0, metavar="INT")
-    filtering.add_argument("--locus_overlap", type=float, default=0.80, metavar="FLOAT")
-    filtering.add_argument("--high_identity", type=float, default=0.60, metavar="FLOAT")
     filtering.add_argument(
-        "--high_query_coverage", type=float, default=0.80, metavar="FLOAT"
+        "--min_query_coverage",
+        type=float,
+        default=0.60,
+        metavar="FLOAT",
+        help="Minimum reference-protein coverage. Default: 0.60.",
+    )
+    filtering.add_argument(
+        "--max_frameshift",
+        type=int,
+        default=1,
+        metavar="INT",
+        help="Maximum permitted frameshift events. Default: 1.",
+    )
+    filtering.add_argument(
+        "--max_stop_codon",
+        type=int,
+        default=0,
+        metavar="INT",
+        help="Maximum permitted internal stop codons. Default: 0.",
+    )
+    filtering.add_argument(
+        "--locus_overlap",
+        type=float,
+        default=0.80,
+        metavar="FLOAT",
+        help="Overlap/shorter-interval threshold for locus merging. Default: 0.80.",
+    )
+    filtering.add_argument(
+        "--high_identity",
+        type=float,
+        default=0.60,
+        metavar="FLOAT",
+        help="High-confidence identity threshold. Default: 0.60.",
+    )
+    filtering.add_argument(
+        "--high_query_coverage",
+        type=float,
+        default=0.80,
+        metavar="FLOAT",
+        help="High-confidence query-coverage threshold. Default: 0.80.",
     )
 
     executables = parser.add_argument_group("external executables")
-    executables.add_argument("--miniprot", default="miniprot", metavar="PATH")
-    executables.add_argument("--gffread", default="gffread", metavar="PATH")
-    executables.add_argument("--pigz", default="pigz", metavar="PATH")
+    executables.add_argument(
+        "--miniprot",
+        default="miniprot",
+        metavar="PATH",
+        help="miniprot executable name or path. Default: miniprot.",
+    )
+    executables.add_argument(
+        "--gffread",
+        default="gffread",
+        metavar="PATH",
+        help="gffread executable name or path. Default: gffread.",
+    )
+    executables.add_argument(
+        "--pigz",
+        default="pigz",
+        metavar="PATH",
+        help="pigz executable name or path. Default: pigz.",
+    )
 
     help_group = parser.add_argument_group("detailed help")
     help_group.add_argument(
@@ -1682,13 +1792,13 @@ def validate_args(args: argparse.Namespace) -> None:
         args.compression_threads = min(args.threads, 8)
     if args.compression_threads < 1:
         raise ValueError("--compression_threads must be >= 1")
-    if args.organism_type == "eukaryote":
+    if args.organism_type == "euk":
         if args.splice_model is None:
             args.splice_model = 1
     else:
         if args.splice_model not in (None, 0):
             raise ValueError(
-                "--splice_model is not used for prokaryotes; omit it or set it to 0"
+                "--splice_model is not used for prok; omit it or set it to 0"
             )
         args.splice_model = 0
     if args.max_intron < 1 or args.max_hits < 1 or args.index_subsample < 0:

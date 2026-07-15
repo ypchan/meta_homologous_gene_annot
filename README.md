@@ -76,19 +76,17 @@ The annotation pipeline requires:
 
 `--skip_sequence_export` skips the gffread CDS, protein, and transcript outputs. `sample.gene.fasta` and both GFF3 files are still generated.
 
-Install the Python dependencies with `pip` in a virtual environment:
+Clone the repository and install it directly with `pip`:
 
 ```bash
 gh repo clone ypchan/meta_homologous_gene_annot
 cd meta_homologous_gene_annot
 
-python3 -m venv .venv
-source .venv/bin/activate
 python3 -m pip install --upgrade pip
 python3 -m pip install -e .
 ```
 
-`pip install -e .` installs the declared dependencies and creates the `meta-homologous-gene-annot` command while keeping the command linked to the current source checkout. Use `python3 -m pip install .` instead for a regular non-editable installation. For an existing checkout, start with `python3 -m venv .venv` in the repository root. Reactivate the environment in a new shell with `source .venv/bin/activate`.
+Run the same two pip commands from the repository root for an existing checkout. No environment is created: packages are installed into the Python environment associated with `python3`. `pip install -e .` installs the declared dependencies and creates the `meta-homologous-gene-annot` command while keeping it linked to the current source checkout. Use `python3 -m pip install .` instead for a regular non-editable installation.
 
 The external bioinformatics programs are compiled executables and cannot be installed with `pip`. Install the GitHub CLI, a C/C++ build toolchain, GNU Make, zlib development headers, and the other system libraries required by the upstream projects. Rust and Cargo are required only for CoverM. The commands below clone the official repositories with `gh repo clone` and install executables under `$HOME/.local/bin`.
 
@@ -209,7 +207,7 @@ python3 meta_homologous_gene_annot.py \
   --contigs assemblies/sample01.fasta.gz \
   --outdir results/sample01 \
   --sample sample01 \
-  --organism_type eukaryote \
+  --organism_type euk \
   --splice_model 1 \
   --max_intron 20000 \
   --threads 24
@@ -223,11 +221,11 @@ python3 meta_homologous_gene_annot.py \
   --contigs assemblies/sample01.fasta.gz \
   --outdir results/sample01 \
   --sample sample01 \
-  --organism_type prokaryote \
+  --organism_type prok \
   --threads 24
 ```
 
-`--organism_type prokaryote` passes `-S` to miniprot to disable splicing; do not set a nonzero `--splice_model` in this mode. Eukaryotic mode defaults to `--splice_model 1`, the general eukaryotic/fungal model. miniprot model `2` is intended for vertebrates and insects, while model `0` disables splice-signal scoring.
+`--organism_type prok` passes `-S` to miniprot to disable splicing; do not set a nonzero `--splice_model` in this mode. `euk` mode defaults to `--splice_model 1`, the general eukaryotic/fungal model. miniprot model `2` is intended for vertebrates and insects, while model `0` disables splice-signal scoring.
 
 ## Main Parameters
 
@@ -235,7 +233,7 @@ All proportions use decimal values from `0` to `1`, not percentages.
 
 | Parameter | Default | Meaning |
 | --- | --- | --- |
-| `--organism_type` | `eukaryote` | `eukaryote` enables splice-aware models and introns; `prokaryote` passes miniprot `-S` and omits introns. |
+| `--organism_type` | `euk` | `euk` enables splice-aware models and introns; `prok` passes miniprot `-S` and omits introns. |
 | `--splice_model` | Eukaryotic `1` | miniprot `-j`; used only in eukaryotic mode. |
 | `--max_intron` | `20000` | Maximum intron length passed to miniprot `-G` in eukaryotic mode. A value that is too small truncates models; a very large value increases runtime and spurious long gaps. |
 | `--index_subsample` | `1` | miniprot `-M` during indexing; the sampling rate is `1/2**M`. |
@@ -566,7 +564,7 @@ python3 meta_homologous_gene_annot.py \
   -c assemblies/sample01.fasta.gz \
   -o results/sample01 \
   --sample sample01 \
-  --organism_type eukaryote \
+  --organism_type euk \
   --force
 ```
 
@@ -609,7 +607,7 @@ Do not run two processes with the same `--outdir` and `--sample` simultaneously.
 ### 1.1.0
 
 - Added `pyproject.toml` for standard and editable pip installation and the `meta-homologous-gene-annot` console command.
-- Added `--organism_type {eukaryote,prokaryote}`; prokaryotic mode passes miniprot `-S` to disable splicing.
+- Added `--organism_type {euk,prok}`; `prok` mode passes miniprot `-S` to disable splicing.
 - Preserved selected miniprot `##PAF` alignment details in raw and filtered GFF3 output.
 - Added a normalized `gene/mRNA/exon/CDS/intron` hierarchy and stable locus IDs to filtered GFF3.
 - Added `sample.gene.fasta` and the independent gene-coordinate `sample.gene.gff3`.
