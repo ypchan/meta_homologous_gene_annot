@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "meta-homologous-gene-annot"
-version = "1.2.0"
+version = "1.1.0"
 description = "Protein-guided annotation and gene-reference export for metagenomic assemblies"
 readme = "README.md"
 requires-python = ">=3.9"

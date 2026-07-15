@@ -60,7 +60,7 @@ from rich_argparse import RawDescriptionRichHelpFormatter
 
 
 PROGRAM = "meta_homologous_gene_annot"
-PROGRAM_VERSION = "1.2.0"
+CHECKPOINT_SCHEMA = "neutral_protein_identifiers"
 GFF_SOURCE = "miniprot"
 STAGE_ORDER = [
     "prepare_reference",
@@ -269,7 +269,7 @@ class PipelineState:
         self.signature = signature
         self.data: dict[str, Any] = {
             "program": PROGRAM,
-            "program_version": PROGRAM_VERSION,
+            "checkpoint_schema": CHECKPOINT_SCHEMA,
             "signature": signature,
             "created_at": iso_now(),
             "updated_at": iso_now(),
@@ -314,7 +314,7 @@ class PipelineState:
     def reset(self) -> None:
         self.data = {
             "program": PROGRAM,
-            "program_version": PROGRAM_VERSION,
+            "checkpoint_schema": CHECKPOINT_SCHEMA,
             "signature": self.signature,
             "created_at": iso_now(),
             "updated_at": iso_now(),
@@ -2036,7 +2036,7 @@ def main() -> int:
         }
 
         signature_payload = {
-            "program_version": PROGRAM_VERSION,
+            "checkpoint_schema": CHECKPOINT_SCHEMA,
             "proteins": file_signature(args.proteins, content_hash=True),
             "contigs": file_signature(args.contigs, content_hash=False),
             "sample": sample,
@@ -2365,7 +2365,7 @@ def main() -> int:
 
                 metadata = {
                     "program": PROGRAM,
-                    "program_version": PROGRAM_VERSION,
+                    "checkpoint_schema": CHECKPOINT_SCHEMA,
                     "command": sys.argv,
                     "signature": signature,
                     "signature_payload": signature_payload,

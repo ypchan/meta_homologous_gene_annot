@@ -29,7 +29,6 @@ The program supports eukaryotic and prokaryotic modes. Eukaryotic mode performs 
 - [Boundary Alignment and Quantification Bias](#boundary-alignment-and-quantification-bias)
 - [Checkpointing and Troubleshooting](#checkpointing-and-troubleshooting)
 - [References](#references)
-- [Changelog](#changelog)
 - [License](#license)
 
 ## Core Output Design
@@ -604,26 +603,6 @@ Do not run two processes with the same `--outdir` and `--sample` simultaneously.
 - [featureCounts examples](https://subread.sourceforge.net/featureCounts.html)
 - [CoverM README](https://github.com/wwood/CoverM)
 - [GFF3 specification](https://github.com/The-Sequence-Ontology/Specifications/blob/master/gff3.md)
-
-## Changelog
-
-### 1.2.0
-
-- Replaced legacy PHI-specific program and identifier names with neutral `meta_homologous_gene_annot`, `MHGREF`, and `MHGLOCUS` names suitable for arbitrary reference proteins.
-
-### 1.1.0
-
-- Added a PAF-free temporary GFF3 for gffread while retaining `##PAF` alignment details in published GFF3 output.
-- Added `pyproject.toml` for standard and editable pip installation and the `meta-homologous-gene-annot` console command.
-- Added `--organism_type {euk,prok}`; `prok` mode passes miniprot `-S` to disable splicing.
-- Preserved selected miniprot `##PAF` alignment details in raw and filtered GFF3 output.
-- Added a normalized `gene/mRNA/exon/CDS/intron` hierarchy and stable locus IDs to filtered GFF3.
-- Added `sample.gene.fasta` and the independent gene-coordinate `sample.gene.gff3`.
-- Added detailed CD-HIT cross-sample dereplication, minibwa/minimap2 mapping, featureCounts/CoverM quantification, and boundary-bias workflows to this README.
-
-### 1.0.0
-
-- Added reference cleaning, miniprot alignment, filtering, locus collapsing, GFF3/sequence export, and checkpointed resume support.
 
 ## License
 
