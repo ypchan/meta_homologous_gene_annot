@@ -85,10 +85,10 @@ cd meta_homologous_gene_annot
 python3 -m venv .venv
 source .venv/bin/activate
 python3 -m pip install --upgrade pip
-python3 -m pip install -r requirements.txt
+python3 -m pip install -e .
 ```
 
-For an existing checkout, start with `python3 -m venv .venv` in the repository root. Reactivate the environment in a new shell with `source .venv/bin/activate`.
+`pip install -e .` installs the declared dependencies and creates the `meta-homologous-gene-annot` command while keeping the command linked to the current source checkout. Use `python3 -m pip install .` instead for a regular non-editable installation. For an existing checkout, start with `python3 -m venv .venv` in the repository root. Reactivate the environment in a new shell with `source .venv/bin/activate`.
 
 The external bioinformatics programs are compiled executables and cannot be installed with `pip`. Install the GitHub CLI, a C/C++ build toolchain, GNU Make, zlib development headers, and the other system libraries required by the upstream projects. Rust and Cargo are required only for CoverM. The commands below clone the official repositories with `gh repo clone` and install executables under `$HOME/.local/bin`.
 
@@ -183,6 +183,7 @@ minibwa --version
 minimap2 --version
 featureCounts -v
 coverm --version
+meta-homologous-gene-annot --help
 python3 meta_homologous_gene_annot.py --help
 ```
 
@@ -197,6 +198,8 @@ Plain and `.gz/.bgz/.bgzf` FASTA files are supported. The first whitespace-delim
 Plain and compressed FASTA files are supported. The first header field is the contig ID and must be unique. Large FASTA files are streamed instead of loading the entire assembly into memory.
 
 ## Annotation Examples
+
+After `pip install -e .` or `pip install .`, `meta-homologous-gene-annot` invokes the same CLI as `python3 meta_homologous_gene_annot.py`. The examples below keep the explicit script form so they also work from an uninstalled checkout.
 
 For eukaryotic genes or other candidates that may contain introns:
 
@@ -605,6 +608,7 @@ Do not run two processes with the same `--outdir` and `--sample` simultaneously.
 
 ### 1.1.0
 
+- Added `pyproject.toml` for standard and editable pip installation and the `meta-homologous-gene-annot` console command.
 - Added `--organism_type {eukaryote,prokaryote}`; prokaryotic mode passes miniprot `-S` to disable splicing.
 - Preserved selected miniprot `##PAF` alignment details in raw and filtered GFF3 output.
 - Added a normalized `gene/mRNA/exon/CDS/intron` hierarchy and stable locus IDs to filtered GFF3.

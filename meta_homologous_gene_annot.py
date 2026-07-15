@@ -1487,21 +1487,26 @@ def build_parser() -> argparse.ArgumentParser:
     RawDescriptionRichHelpFormatter.styles["argparse.metavar"] = "bold green"
     RawDescriptionRichHelpFormatter.styles["argparse.prog"] = "bold magenta"
 
+    program_name = Path(sys.argv[0]).name
+    example_command = (
+        f"python3 {program_name}" if program_name.endswith(".py") else program_name
+    )
+
     parser = argparse.ArgumentParser(
-        prog="meta_homologous_gene_annot.py",
+        prog=program_name,
         description=(
             "Map reference proteins to one metagenomic assembly with miniprot, retain "
             "high-quality gene models, and export contig-coordinate plus standalone-gene "
             "GFF3/FASTA references."
         ),
-        epilog=r"""
+        epilog=f"""
 Example:
-  python3 %(prog)s \
-      --proteins phi-base_current.fas \
-      --contigs 201704_MF1.fasta.gz \
-      --outdir 201704_MF1.phi_scan \
-      --sample 201704_MF1 \
-      --organism_type eukaryote \
+  {example_command} \\
+      --proteins phi-base_current.fas \\
+      --contigs 201704_MF1.fasta.gz \\
+      --outdir 201704_MF1.phi_scan \\
+      --sample 201704_MF1 \\
+      --organism_type eukaryote \\
       --threads 24
 
 Resume is automatic. Use --force to discard compatible checkpoints and rerun.
